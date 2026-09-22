@@ -14,7 +14,7 @@ def read(filename):
             data = fp.read()
             return data
         
-    except:
+    except OSError:
         new_socket.sendall(
             encode("HTTP/1.1 404 Not Found\r\n"
                 "Content-Length: 13\r\n"
@@ -25,6 +25,14 @@ def read(filename):
 
     return None
 
+def make_index():
+    paths = list(os.listdir())
+    payload = ""
+
+    for path in paths:
+        payload += f"<a href='{path}'>{path}</a><br>"
+
+    return payload
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--port", type=int, default=28333)
@@ -40,6 +48,9 @@ mime_dict = {
     ".txt": "text/plain",
     ".html": "text/html",
     ".ico": "image/x-icon",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeeg",
+    ".pdf": "application/pdf"
 }
 
 while True:
@@ -48,19 +59,32 @@ while True:
     header_data = content.split("\r\n")
     method, full_path, protocol = header_data[0].split(" ")
     filename = os.path.split(full_path)[-1]
-    content_type = mime_dict.get(os.path.splitext(full_path)[1])
-    payload = read(filename)
 
-    print(f"New connection from IP Address {address[0]}:{address[1]}")
-    print(f"HTTP Method : {method}")
-    print(f"File : {filename}")
-    print(f"Protocol : {protocol}")
-    print(f"Content type: {content_type}")
+    if full_path == "/":
+        payload = make_index()
+        filename = "index.txt"
+        content_type = "text/html"
+    else:
+        content_type = mime_dict.get(os.path.splitext(full_path)[1])
+        payload = decode(read(filename))
 
     if payload is None:
         new_socket.close()
         continue
 
-    new_socket.sendall(encode(f"HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {len(payload)}\r\nConnection: close\r\n\r\n") + payload)
+    print(
+        f"New connection from IP Address {address[0]}:{address[1]}\r\n"
+        f"HTTP Method : {method}\r\n"
+        f"File : {filename}\r\n"
+        f"Protocol : {protocol}\r\n"
+        f"Content type: {content_type}\r\n"
+        )
+
+    new_socket.sendall(encode(f"HTTP/1.1 200 OK\r\n"
+                              f"Content-Type: {content_type}\r\n"
+                              f"Content-Length: {len(payload)}\r\n"
+                              f"Connection: close\r\n\r\n{payload}") 
+                              )
+
     new_socket.close()
     

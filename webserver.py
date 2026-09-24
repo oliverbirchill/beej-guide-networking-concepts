@@ -28,13 +28,19 @@ def read(filename):
 
     return None
 
-def verify_absolute_path(relative_path, server_root):
-    relative_path = os.path.abspath(relative_path)
+def verify_absolute_path(file_path, server_root):
+    """
+    Checks that the resolved file path is within the server root.
+    For example, if a client requests /../../../../etc/passwd,
+    abspath() resolves the ".." components, allowing us to detect
+    that the resulting path is outside the server root.
+    """
+    absolute_path = os.path.abspath(file_path)
 
-    return relative_path.startswith(server_root)
+    return absolute_path.startswith(server_root)
 
 def generate_listing(directory):
-    paths = list(os.listdir(directory))
+    paths = os.listdir(directory)
     payload = ""
 
     for path in paths:
@@ -43,16 +49,36 @@ def generate_listing(directory):
 
     return encode(payload)
 
+def parse_request(content, server_root):
+    header_data = content.split("\r\n")
+    request_line = header_data[0].split()
+
+    if len(request_line) != 3:
+        return None
+    
+    method, get_path, protocol = request_line
+
+    absolute_path = os.path.join(server_root, get_path[1:]) # Removes preceding "/" from get path
+    relative_path = get_path[1:]
+
+    return method, get_path, protocol, relative_path, absolute_path
+
+def make_headers(content_type, payload):
+    return encode(
+        f"HTTP/1.1 200 OK\r\n"
+        f"Content-Type: {content_type}\r\n"
+        f"Content-Length: {len(payload)}\r\n"
+        f"Connection: close\r\n\r\n"
+        ) 
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--port", type=int, default=28333)
-
 args = parser.parse_args()
 
 server_socket = socket.socket()
 server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server_socket.bind(("127.0.0.1", args.port))
 server_socket.listen()
-
 server_root = os.path.abspath(".")
 
 mime_dict = {
@@ -67,10 +93,14 @@ mime_dict = {
 while True:
     new_socket, address = server_socket.accept()
     content = decode(new_socket.recv(4096))
-    header_data = content.split("\r\n")
-    method, get_path, protocol = header_data[0].split(" ")
-    absolute_path = os.path.join(server_root, get_path[1:]) # Removes preceding "/" from get path
-    relative_path = get_path[1:]
+
+    request = parse_request(content, server_root)
+
+    if request is None:
+        new_socket.close()
+        continue
+
+    method, get_path, protocol, relative_path, absolute_path = request
 
     if not verify_absolute_path(absolute_path, server_root):
         send_404()
@@ -98,14 +128,7 @@ while True:
         f"Content type: {content_type}\r\n"
     )
 
-    headers = encode(
-            f"HTTP/1.1 200 OK\r\n"
-            f"Content-Type: {content_type}\r\n"
-            f"Content-Length: {len(payload)}\r\n"
-            f"Connection: close\r\n\r\n"
-            ) 
-    
+    headers = make_headers(content_type, payload)
     new_socket.sendall(headers + payload)
-
     new_socket.close()
     
